@@ -93,3 +93,122 @@ class Ticket {
         return "Ticket#" + id + " [paid=" + paid + ", exited=" + exited + "]";
     }
 }
+
+/**
+ * PaymentTerminal hängt von diesem Interface ab.
+ * Neue Preislogiken lassen sich hinzufügen, ohne bestehende Klassen zu ändern.
+ */
+interface PricingStrategy {
+    /**
+     * Berechnet den zu zahlenden Betrag für die Parkdauer von entryTime bis
+     * payTime.
+     */
+    double calculatePrice(Instant entryTime, Instant payTime);
+}
+
+/**
+ * Minutenpreis, auf volle Minuten aufgerundet (mind. 1 Minute).
+ */
+class PerMinutePricing implements PricingStrategy {
+    private final double pricePerMinute;
+
+    public PerMinutePricing(double pricePerMinute) {
+        this.pricePerMinute = pricePerMinute;
+    }
+
+    @Override
+    public double calculatePrice(Instant entryTime, Instant payTime) {
+        long minutes = Duration.between(entryTime, payTime).toMinutes();
+        long payableMinutes = Math.max(1, minutes); // min. 1 Minute
+        return payableMinutes * pricePerMinute;
+    }
+}
+
+/**
+ * Basisklasse für Einfahrts- und Ausfahrtschranken.
+ */
+abstract class Gate {
+    private final String gateId;
+
+    protected Gate(String gateId) {
+        this.gateId = gateId;
+    }
+
+    public String getGateId() {
+        return gateId;
+    }
+
+    protected void open() {
+        System.out.println("Schranke " + gateId + " öffnet.");
+    }
+
+    protected void deny(String reason) {
+        System.out.println("Schranke " + gateId + " bleibt geschlossen: " + reason);
+    }
+}
+
+/**
+ * Verantwortlich für den Einlassprozess.
+ */
+class EntryGate extends Gate {
+    private final ParkingGarage garage;
+
+    public EntryGate(String gateId, ParkingGarage garage) {
+        super(gateId);
+        this.garage = garage;
+    }
+
+    /**
+     * Fahrer drückt "Ticket ziehen". Gibt Ticket aus, wenn Plätze frei sind,
+     * Schranke öffnet dann.
+     */
+    public Ticket requestEntry() {
+        Optional<Ticket> maybe = garage.tryIssueTicket();
+        if (maybe.isPresent()) {
+            open();
+            return maybe.get();
+        } else {
+            deny("Keine freien Plätze.");
+            return null;
+        }
+    }
+}
+
+/**
+ * Verantwortlich für die Ausfahrtprüfung: Ticket muss bezahlt sein und noch
+ * nicht benutzt.
+ */
+class ExitGate extends Gate {
+    private final ParkingGarage garage;
+
+    public ExitGate(String gateId, ParkingGarage garage) {
+        super(gateId);
+        this.garage = garage;
+    }
+
+    /**
+     * Versucht Ausfahrt. Öffnet nur bei bezahltem, gültigem Ticket.
+     */
+    public boolean tryExit(Ticket ticket) {
+        if (ticket == null) {
+            deny("Kein Ticket vorgelegt.");
+            return false;
+        }
+        if (!ticket.isPaid()) {
+            deny("Ticket ist nicht bezahlt.");
+            return false;
+        }
+        if (ticket.hasExited()) {
+            deny("Ticket bereits benutzt.");
+            return false;
+        }
+        boolean ok = garage.registerExit(ticket);
+        if (ok) {
+            open();
+            return true;
+        } else {
+            deny("System verweigert Ausfahrt.");
+            return false;
+        }
+    }
+}
