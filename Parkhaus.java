@@ -212,3 +212,87 @@ class ExitGate extends Gate {
         }
     }
 }
+
+class PaymentTerminal {
+    private final String terminalId;
+    private final PricingStrategy pricing;
+
+    public PaymentTerminal(String terminalId, PricingStrategy pricing) {
+        this.terminalId = terminalId;
+        this.pricing = pricing;
+    }
+
+    /**
+     * Führt Bezahlung aus und markiert Ticket als bezahlt.
+     */
+    public double pay(Ticket ticket, Instant payTime) {
+        if (ticket == null)
+            throw new IllegalArgumentException("Ticket darf nicht null sein.");
+        if (ticket.isPaid()) {
+            System.out.println("[" + terminalId + "] Ticket " + ticket.getId() + " ist bereits bezahlt.");
+            return 0.0;
+        }
+        double amount = pricing.calculatePrice(ticket.getEntryTime(), payTime);
+        // Zahlung erfolgreich = Ticket markieren.
+        ticket.markPaid();
+        System.out.printf(Locale.GERMANY,
+                "[%s] Zahlung für Ticket #%d: %.2f CHF%n", terminalId, ticket.getId(), amount);
+        return amount;
+    }
+}
+
+/**
+ * Verwaltet Plätze, Tickets, Ein-/Ausfahrten. Interne Zustände privat, Zugang
+ * über Methoden.
+ */
+class ParkingGarage {
+    private final int capacity;
+    private final PricingStrategy pricing;
+    private int occupied = 0;
+    private int ticketCounter = 0;
+
+    // "Datenbank" der aktiven Tickets
+    private final Map<Integer, Ticket> activeTickets = new HashMap<>();
+
+    public ParkingGarage(int capacity, PricingStrategy pricing) {
+        if (capacity <= 0)
+            throw new IllegalArgumentException("Kapazität > 0 erforderlich.");
+        this.capacity = capacity;
+        this.pricing = pricing;
+    }
+
+    public int getFreeSpots() {
+        return capacity - occupied;
+    }
+
+    /**
+     * Gibt optional ein Ticket aus, wenn Plätze frei sind.
+     */
+    public Optional<Ticket> tryIssueTicket() {
+        if (occupied >= capacity)
+            return Optional.empty();
+        int id = ++ticketCounter;
+        Ticket ticket = new Ticket(id, Instant.now());
+        activeTickets.put(id, ticket);
+        occupied++;
+        return Optional.of(ticket);
+    }
+
+    /**
+     * Registriert die Ausfahrt:
+     * Ticket muss existieren, bezahlt und unverbraucht sein.
+     * Verringert Belegung, markiert Ticket als verwendet.
+     */
+    public boolean registerExit(Ticket ticket) {
+        Ticket stored = activeTickets.get(ticket.getId());
+        if (stored == null)
+            return false;
+        if (!stored.isPaid() || stored.hasExited())
+            return false;
+
+        stored.markExited();
+        activeTickets.remove(stored.getId());
+        occupied = Math.max(0, occupied - 1);
+        return true;
+    }
+}
